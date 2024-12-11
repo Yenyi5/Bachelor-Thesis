@@ -1,7 +1,7 @@
 """"
 Zenodo
-serial implementation of main_05.py script -> simpler and less prone to server overload
-However, slower than parallel execution
+- simpler and less prone to server overload
+- slower than parallel execution
 
 """
 import requests
@@ -10,22 +10,17 @@ import csv
 import random
 import pickle
 
-### parameters ###
-page_size = 200
-n_desired_records = 500  # Either random sample the desired records number from all available or choose all available if not enough for random sampling
-# URL for API platform
-API_URL =  "https://zenodo.org/api/records"
+# Define key parameters for the script
+page_size = 200 # Number of results per page
+n_desired_records = 500 # Desired number of geospatial records to retrieve
+API_URL =  "https://zenodo.org/api/records" # Zenodo API base URL
 API_version = 1
-##################
 
-# query keys that are serially searched for 
+# Define query keywords and geospatial file formats to filter
 query_list = ['geospatial', 'gis', 'remote sensing', 'ISO 19115', 'ISO 19119', 'ISO 19139','shapefile', 'geodatabase', 'vector', 'raster']
-#query_list = ['remote sensing']
-# file formats for filtering out relevant search results
 geospatial_format_list = ['.shp', '.geojson', '.kml','.gml', '.asc', '.tif', '.tiff', '.img','.rst', '.gdb']  # You can add more formats if needed
 
-# Define the standard keys you want to include in your CSV
-#this was not used
+# Keys to include in the saved records
 standard_save_keys = [
     'submitted', 'metadata', 'owners', 'updated', 'doi_url', 
     'state', 'conceptdoi', 'files', 'id', 'links', 
@@ -54,7 +49,7 @@ def get_total_pages(zenodo_url, query_string, size, retries=3):
 
 def fetch_records(zenodo_url, query_string, page_number, size, retries=3):
     """Fetch records from a specific page number with retry logic and enhanced error handling."""
-    backoff_time = 4
+    backoff_time = 4  # Initial backoff time
     max_backoff = 64  # Maximum backoff time in seconds
 
     for attempt in range(retries):
@@ -83,25 +78,25 @@ def filter_geospatial_files(records,geospatial_format_list,query_key):
     """Filter for geospatial records based on file formats."""
 
     filtered_records = []
-    # Durchlaufe alle records
+    # Iterate over all records
     for record in records:
-        # Prüfe, ob der key 'files' im record existiert
+        # Check, if key 'files' exists in the record
         if 'files' in record:
-            # Überprüfe, ob eines der files das Dateiformat in geospatial_format_list hat
+            # Check, if one of the files matches a format in the geospatial_format_list 
             for file in record['files']:
                 if file['key'].lower().endswith(tuple(geospatial_format_list)):
                     
         
-                    # Collect all file names (not just matching ones)
+                    # Collect all file names 
                     all_file_names = [file['key'] for file in record['files']]
                     record.update({'file_format': all_file_names})
-                    # Füge den neuen Key 'query_key' zum record hinzu
+                    # Add the new key 'query_key' to the record
                     record.update({'query_key': query_key})
                     
-                    # Füge den neuen Key 'sum_size' hinzu, falls mehrere files im record enthalten sind, werden die einzelnen sizes addiert
+                    # Add the new key 'sum_size' to the record, if there are multiple files, sum up their sizes 
                     record.update({'sum_size': sum([ f['size'] for f in record['files'] ])})
 
-                    # Füge den aktualisierten record zur Liste der gefilterten records hinzu
+                    # Add the updated record to filtered_records
                     filtered_records.append(record)
             
     return filtered_records
@@ -122,24 +117,13 @@ def normalize_data(original_dict, key_mapping_dict):
     return normalized_dict
 
 def save_results(records,API_version, filename='geospatial_files.pkl'):
-    """Save the collected records to read_pickle file."""
-    # ToDo :
-        # key_mapping_dict erweitern und für jede API anpassen. Ziel ist es, dass alles einheitlich ist -> identischen keys
-        # überlegen welche Daten und einträge sind relevant für dich!
-    # folgender code findet alle keys die in records enthalten sind 
-    # Collect all unique keys from the records
+    """Save the collected records to a file in pickle format"""
+ 
     keys = set()
     for record in records:
         keys.update(record.keys())
     keys = list(keys)
-    # könnte helfen abzuschätzen was alles benötigt wird und was nicht wichtig ist. (wird dennoch abgespeichert ?! why not)
-    
-    # available keys for Zenodo API : 
-    # ['submitted', 'metadata', 'owners', 'updated', 'doi_url', 'state', 'conceptdoi', 'files', 'id', 'links', 'status', 'title', 'modified', 'conceptrecid', 'revision', 'stats', 'created', 'recid', 'doi']
-    # submitted key is changed into submission_date ...
-    # so right side keys in mapping dict are  changed into left side keys
-    
-    # Zenodo API
+   
     key_mapping_dict = {
     'doi': 'doi',
     'doi_URL': 'doi_URL',
@@ -152,40 +136,17 @@ def save_results(records,API_version, filename='geospatial_files.pkl'):
     'size(bytes)': 'size'
     # Add more mappings as needed
     }
-    # define filename for saving
-    filename = '1_Zenodo_debug_'+ filename
-    
-
+    # Define filename for saving
+    filename = '1_Zenodo_'+ filename
     
     if not records:
         print("No records to save.")
         return
     
-
-    # MODIFY
     # Normalize each record
     normalized_records = [normalize_data(record, key_mapping_dict) for record in records]
 
-    # Get fieldnames from the first record (after normalization) for csv file writing
-    
-    fieldnames = normalized_records[0].keys() if normalized_records else []
-    #is this still necessary?
-    # Write to CSV
-    with open(filename, 'w', newline='', encoding='utf-8', errors='replace') as output_file:
-        dict_writer = csv.DictWriter(output_file, fieldnames=fieldnames)
-        dict_writer.writeheader()
-    if not records:
-        print("No records to save.")
-        return
-    #why second time?
-    # Normalize each record
-    normalized_records = [normalize_data(record, key_mapping_dict) for record in records]
-    #why second time??
-    # Get fieldnames from the first record (after normalization)
-    fieldnames = normalized_records[0].keys() if normalized_records else []
-
-    
-    # write to read_pickle
+    # Write to read_pickle
     with open(filename, 'wb') as output_file:  # Open file in binary write mode
         pickle.dump(normalized_records, output_file)  # Serialize the data and save it
         
@@ -198,7 +159,7 @@ def main():
 
     print("Starting search for geospatial files on Zenodo...")
     
-    # run iteratively for each query_list entry
+    # Run iteratively for each query_list entry
     for query_string in query_list:
         print(' ')
         print(f"#### searching for query string :  {query_string} ####")
@@ -209,7 +170,7 @@ def main():
             print("Failed to get total pages. Skipping this query.")
             continue
         #debug
-        total_pages = 1
+        #total_pages = 1
         for page in range(1, total_pages + 1):
             try:
                 records = fetch_records(API_URL, query_string, page, page_size)
@@ -245,7 +206,7 @@ def main():
             # storing failed_pages that failed retry at the end for documentation in dict
             final_failed_pages_dict['query_string'] = final_failed_pages
             
-
+     
     if len(collected_records) >= n_desired_records:
         print(f"{len(collected_records)} records collected -> randomly sample {n_desired_records} records")
         selected_records = random.sample(collected_records, n_desired_records)
@@ -257,9 +218,6 @@ def main():
         print("No geospatial records found. Exiting.")
         return
 
-    # ToDo
-    # final_failed_pages_dict save
-    
     save_results(selected_records,API_version)
     print(f"Saved {len(selected_records)} records to file.")
 
