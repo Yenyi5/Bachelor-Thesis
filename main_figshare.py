@@ -6,8 +6,8 @@ Created on 08.10.2024
 
 """
 Figshare
-serial implementation of main_05.py script -> simpler and less prone to server overload
-However, slower than parallel execution
+- Simpler and less prone to server overload
+- Slower than parallel execution
 
 """
 import requests
@@ -16,19 +16,17 @@ import csv
 import random
 import pickle
 
-### parameters ###
-page_size = 200
-n_desired_records = 500  # Either random sample the desired records number from all available or choose all available if not enough for random sampling
+# Define key parameters for the script
+page_size = 200 # Number of results per page
+n_desired_records = 500 # Desired number of geospatial records to retrieve
 # URL for API platform
 API_URL = "https://api.figshare.com/v2/articles"
 API_version = 1 
 
 ##################
 
-# query keys that are serially searched for 
+# Define query keywords and geospatial file formats to filter
 query_list = ['geospatial','geo', 'gis', 'remote sensing', 'ISO 19115', 'ISO 19119', 'ISO 19139', 'shapefile', 'geodatabase', 'vector', 'raster']
-#query_list = ['geospatial']
-# file formats for filtering out relevant search results
 geospatial_format_list = ['.shp', '.geojson', '.kml','.gml', '.asc', '.tif', '.tiff', '.img','.rst', '.gdb']  # You can add more formats if needed
                          
 def get_article_files(api_url,article_id):
@@ -36,7 +34,6 @@ def get_article_files(api_url,article_id):
     response = requests.get(f"{api_url}/{article_id}")
     response.raise_for_status()
     article_details = response.json()
-
     # Extract the files list from the article details
     if 'files' in article_details:
         return article_details['files'] # multiple files for each "record"
@@ -48,11 +45,7 @@ def fetch_records(api_url, query_string, page_number, size, retries=1):
     """Fetch records from a specific page number with retry logic and enhanced error handling."""
     
     try:
-
-    # neu
         response = requests.get(api_url, params={'search_for': query_string, 'page': page_number, 'page_size': size}, timeout=30)
-    # alt
-    #response = requests.get(zenodo_url, params={'size': size, 'page': page_number, 'q': query_string}, timeout=30)
         response.raise_for_status()  # Raise an error for bad responses
     except requests.exceptions.HTTPError as e:
         if response.status_code == 400: 
@@ -60,22 +53,16 @@ def fetch_records(api_url, query_string, page_number, size, retries=1):
             return None, False
     
     metadata_list = response.json()
-    
     update_metadata_list = list()
+    
+    # Process each record in the metadata list
     for metadata in metadata_list:#[:10]:
         try:
-            # hier mit get_article_files() die files zu den metadaten runterladen
+            # Fetch file details for the record
             data = get_article_files(API_URL,metadata['id']) # file format info in "name" key
             # data keys: 'id', 'name', 'size', 'is_link_only', 'download_url', 'supplied_md5', 'computed_md5', 'mimetype'
-            
             if len(data)>0: # if metadata contains data, then get file information and add to dict
-                # data beinhaltet den key "name" der den filenamen mit der zugehörigen datapoint endung beinhaltet
-                # falls tatsächliches file notwendig ist, dann müsste hier im nächsten schritt noch die datei runtergeladen werden
-                # requests.get() with stream=True lädt daten herunter
-                # data und metadata dict werden in metadata dict zusammengefügt 
-        
-                # reformat list of data dicts into a single data dict with multiple values (f.e. file ids)
-                # Initialize an empty dictionary to hold the result
+               
                 single_data_dict = {}
                 # Iterate over each dictionary in the list
                 for dictionary in data:
@@ -88,16 +75,16 @@ def fetch_records(api_url, query_string, page_number, size, retries=1):
                 single_data_dict['file_format'] = single_data_dict.pop('name')
 
                 metadata.update(single_data_dict)
-                # metadata geupdatet keys: 
+                # metadata updated keys: 
                     # 'id', 'title', 'doi', 'handle', 'url', 'published_date', 'thumb', 'defined_type', 'defined_type_name', 'group_id', 'url_private_api', 'url_public_api', 'url_private_html', 'url_public_html', 'timeline', 'resource_title', 'resource_doi', 'name', 'size', 'is_link_only', 'download_url', 'supplied_md5', 'computed_md5', 'mimetype'
-                # geupdatete metadata (einzelner update step) werden wieder in eine list zusammengesammelt
+                # Updated metadata gets added into update_metadata_list
             update_metadata_list.append(metadata)
             
         except  requests.exceptions.RequestException as e:
             print(f"Request error on page {page_number}: {e}")
             continue
         
-    # check if available page number deviates from defined number of page entries, then probably no more pages left
+    # Check, if available page number deviates from defined number of page entries
     if len(metadata_list)<size:
         has_more_pages = False
     else:
@@ -109,21 +96,19 @@ def filter_geospatial_files(records,geospatial_format_list,query_key):
     """Filter for geospatial records based on file formats."""
 
     filtered_records = []
-    # Durchlaufe alle records
+    # Iterate over all records
     for record in records:
-        # Prüfe, ob der key 'files' im record existiert
+        # Checks, if the key 'files' exists in record
         if 'file_format' in record:
-            # Überprüfe, ob eines der files (hier unter name key) das Dateiformat in geospatial_format_list hat
+            # Checks, if one of the files matches a data format in geospatial_format_list 
             for file in record['file_format']:
                 if file.lower().endswith(tuple(geospatial_format_list)):
 
-                    # Füge den neuen Key 'query_key' zum record hinzu
+                    # Add the new key 'query_key' to record
                     record.update({'query_key': query_key})
-                    
-                    # Füge den neuen Key 'sum_size' hinzu, falls mehrere files im record enthalten sind, werden die einzelnen sizes addiert
+                    # Add the new key 'sum_size' to the record, if there are multiple files, sum up their sizes 
                     record.update({'sum_size': sum( record['size']) })
-
-                    # Füge den aktualisierten record zur Liste der gefilterten records hinzu
+                    # Add the updated record to filtered_records
                     filtered_records.append(record)
                     
             
@@ -146,9 +131,7 @@ def normalize_data(original_dict, key_mapping_dict):
 
 def save_results(records,API_version, filename='geospatial_files.pkl'):
     """Save the collected records to pickle file."""
-    ### Hier muss noch angepasst werden!
-
-    # Figshare API
+   
     key_mapping_dict = {
     'submission_date': 'submitted',
     'metadata_info': 'metadata',
@@ -160,7 +143,7 @@ def save_results(records,API_version, filename='geospatial_files.pkl'):
     # define filename for saving
     filename = '2_Figshare_'+filename
         
-    
+
     if not records:
         print("No records to save.")
         return
@@ -168,32 +151,14 @@ def save_results(records,API_version, filename='geospatial_files.pkl'):
     # Normalize each record
     normalized_records = [normalize_data(record, key_mapping_dict) for record in records]
 
-    # Get fieldnames from the first record (after normalization) for csv file writing
-    
-    fieldnames = normalized_records[0].keys() if normalized_records else []
-
-    # Write to CSV
-    with open(filename, 'w', newline='', encoding='utf-8', errors='replace') as output_file:
-        dict_writer = csv.DictWriter(output_file, fieldnames=fieldnames)
-        dict_writer.writeheader()
-    if not records:
-        print("No records to save.")
-        return
-    
-    # Normalize each record
-    normalized_records = [normalize_data(record, key_mapping_dict) for record in records]
-
-    # Get fieldnames from the first record (after normalization)
-    fieldnames = normalized_records[0].keys() if normalized_records else []
-
-    # write to pickle
+    # Erite to pickle
     with open(filename, 'wb') as output_file:  # Open file in binary write mode
         pickle.dump(normalized_records, output_file)  # Serialize the data and save it
         
 
 
 def main():
-    ### initialisation ###
+    ### Initialisation ###
     collected_records = []
     failed_pages = []  # Track failed pages for a final retry
     final_failed_pages_dict = dict()
@@ -262,9 +227,6 @@ def main():
     if not selected_records:
         print("No geospatial records found. Exiting.")
         return
-
-    # ToDo
-    # final_failed_pages_dict save
     
     save_results(selected_records,API_version)
     print(f"Saved {len(selected_records)} records to file.")
